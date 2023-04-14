@@ -1,0 +1,58 @@
+version: 0.2
+
+env:
+  shell: bash
+
+  variables:
+    TERRAFORM_VERSION: "1.4.2"
+    TERRAGRUNT_VERSION: "0.45.0"
+
+  exported-variables:
+    - BuildID
+    - BuildTag
+
+phases:
+  install:
+  
+    commands:
+      - echo Entered the install phase...
+
+      # install terraform binary
+      - echo Installing Terraform
+      - curl -s -qL -o terraform_install.zip https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_amd64.zip
+      - unzip terraform_install.zip && mv terraform /usr/bin
+
+      # install terragrunt binary
+      - echo Installing Terragrunt
+      - curl -Lo terragrunt https://github.com/gruntwork-io/terragrunt/releases/download/v${TERRAGRUNT_VERSION}/terragrunt_linux_amd64
+      - chmod +x terragrunt
+      - mv terragrunt /usr/bin
+
+    finally:
+      # output versions
+      - terraform --version
+      - terragrunt --version
+
+  build:
+    commands:
+
+      # Go to accounts folder
+      - cd $CODEBUILD_SRC_DIR/src/accounts
+
+      # Find all Terragrunt modules to destroy
+      - tg_modules_to_destroy=$(find . -maxdepth 4 -name terragrunt.hcl -execdir [ -e .destroy ] \; -printf " --terragrunt-include-dir %h")
+      
+      # Destroy modules no longer needed
+      - |
+        if [[ -n "${tg_modules_to_destroy}" ]]; then
+          terragrunt run-all apply $tg_modules_to_destroy -destroy -no-color
+        fi
+      
+      # Find all Terragrunt modules that do not contain a .destroy file
+      - tg_modules=$(find . -maxdepth 4 -name terragrunt.hcl -execdir [ ! -e .destroy ] \; -printf " --terragrunt-include-dir %h")
+
+      # Apply all changes
+      - |
+        if [[ -n "${tg_modules}" ]]; then
+          terragrunt run-all apply $tg_modules -no-color
+        fi

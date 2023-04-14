@@ -1,0 +1,46 @@
+# general settings
+namespace: "your_namespace"
+name: "your_project_name"
+
+# Terraform configuration
+# must match the remote_state config in terragrunt.hcl
+terraform_state_bucket: "terraform-state"
+terraform_state_bucket_region: "ap-southeast-2"
+terraform_state_dynamodb_table: "TerraformLock"
+
+# CloudTrail configuration
+cloudtrail_bucket: "organization-trail"
+
+# the region where the terraform state is deployed
+management_aws_region: "ap-southeast-2"
+
+# the path of the Organization management account Terraform state
+management_terraform_state_path: "management/organization/terraform.tfstate"
+
+# Administrator default role policy ARN
+administrator_default_arn: "arn:aws:iam::aws:policy/AdministratorAccess"
+# Terraform deployment role
+terraform_deployment_role_name: "TerraformDeployment"
+
+# details of accounts to be created
+security_account_email: "aws+security@your_email.com"
+deployment_account_email: "aws+deployment@your_email.com"
+development_account_email: "aws+development@your_email.com"
+logging_account_email: "aws+logging@your_email.com"
+shared_services_account_email: "aws+shared-services@your_email.com"
+
+# notifications
+build_notification_email: "aws+build-notifications@your_email.com"
+billing_alarm_notification_email: "aws+billing-alarm-notification@your_email.com"
+billing_monthly_threshold: 100
+billing_currency: "AUD"
+
+# CI/CD pipeline
+pipeline_name: "pipeline"
+source_artifact_name: "SourceArtifact"
+plan_artifact_name: "PlanArtifact"
+
+# configuration for automation
+default_environment:
+  TF_IN_AUTOMATION: 1
+  TF_INPUT: 0

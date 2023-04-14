@@ -1,0 +1,132 @@
+version: 0.2
+
+env:
+  shell: bash
+
+  variables:
+    TERRAFORM_VERSION: "1.4.2"
+    TERRAGRUNT_VERSION: "0.45.0"
+
+  exported-variables:
+    - BuildID
+    - BuildTag
+
+phases:
+  install:
+    runtime-versions:
+      nodejs: 16
+
+    commands:
+      - echo Entered the install phase...
+
+      # install terraform binary
+      - echo Installing Terraform
+      - curl -s -qL -o terraform_install.zip https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_amd64.zip
+      - unzip terraform_install.zip && mv terraform /usr/bin
+      - rm terraform_install.zip
+
+      # install terragrunt binary
+      - echo Installing Terragrunt
+      - curl -Lo terragrunt https://github.com/gruntwork-io/terragrunt/releases/download/v${TERRAGRUNT_VERSION}/terragrunt_linux_amd64
+      - chmod +x terragrunt
+      - mv terragrunt /usr/bin
+
+      # install terraform visual
+      - npm install -g @terraform-visual/cli
+
+    finally:
+      # output versions
+      - terraform --version
+      - terragrunt --version
+
+  build:
+    commands:
+
+      # Go to accounts folder
+      - cd $CODEBUILD_SRC_DIR/src/accounts
+
+      # Create a reports folder for terraform visual plans
+      - reports_artifacts_path=$CODEBUILD_SRC_DIR/reports/terraform-visual
+      - mkdir -p $reports_artifacts_path/plans
+
+      # Find all Terragrunt modules to destroy
+      - tg_modules_to_destroy=$(find . -maxdepth 4 -name terragrunt.hcl -execdir [ -e .destroy ] \; -printf " --terragrunt-include-dir %h")
+      
+      # Plan to destroy modules no longer needed
+      - |
+        if [[ -n "${tg_modules_to_destroy}" ]]; then
+          terragrunt run-all plan $tg_modules_to_destroy -destroy -no-color -out=tfplan.binary
+        fi
+      
+      # Find all Terragrunt modules that do not contain a .destroy file
+      - tg_modules=$(find . -maxdepth 4 -name terragrunt.hcl -execdir [ ! -e .destroy ] \; -printf " --terragrunt-include-dir %h")
+
+      # Plan all changes
+      - |
+        if [[ -n "${tg_modules}" ]]; then
+          terragrunt run-all plan $tg_modules -no-color -out=tfplan.binary
+        fi
+
+      # Find all tfplan.binary files
+      - tg_binaries=$(find . -name 'tfplan.binary')
+
+      # Process artifacts
+      - |
+        for module_path in ${tg_binaries[@]};
+          do
+            module_dir=$(dirname $module_path)
+            module_dir=$(echo "$module_dir" | sed 's/\(.*\)\/\.terragrunt-cache\/.*/\1/')
+
+            module=$(basename $module_dir)
+            account_dir=$(dirname $module_dir)
+            account=$(basename $account_dir)
+            region_dir=$(dirname $account_dir)
+            region=$(basename $region_dir)
+            
+            # Convert binary plan file to JSON file
+            echo "Running terragrunt show for $module"
+            terragrunt show -json $(basename $module_path) --terragrunt-working-dir $module_dir --terragrunt-no-auto-init > $module_dir/plan.json
+
+            # Create terraform visual plan
+            terraform-visual --plan $module_dir/plan.json --out $module_dir 
+
+            # Prefix that will be used when renaming Terraform Visual reports
+            prefix=$region-$account-$module
+            # The path where Terraform Visual reports are currently stored
+            report_dir=$module_dir/terraform-visual-report
+
+            # Rename the index.html file to include prefix
+            mv $report_dir/index.html $report_dir/$prefix-terraform-visual.html
+
+            # Rename the plan.js file and copy into plans subfolder
+            mkdir $report_dir/plans
+            mv $report_dir/plan.js $report_dir/plans/$prefix-plan.js
+
+            # Rename plan.js reference inside the terraform visual HTML file
+            sed -i -e "s@\./plan\.js@\./plans/$prefix\-plan\.js@g" $report_dir/$prefix-terraform-visual.html
+
+            # Copy all terraform visual files in current directory 
+            # to a common reporting folder and overwrite any common files
+            cp -a $report_dir/* $reports_artifacts_path/
+
+          done
+
+      - "export BuildID=`echo $CODEBUILD_BUILD_ID | cut -d: -f1`"
+      - "export BuildTag=`echo $CODEBUILD_BUILD_ID | cut -d: -f2`"   
+          
+artifacts:
+  files:
+    - "**/*"
+  exclude-paths: 
+    - "**/terraform-visual-report/**/*"
+    - "reports/**/*"
+  secondary-artifacts:
+    Plans:
+      files:
+        - "**/plan.json"
+      base-directory: $CODEBUILD_SRC_DIR/src/accounts
+    TerraformVisual:
+      files:
+        - "**/*"
+      name: terraform-visual-$CODEBUILD_BUILD_ID
+      base-directory: $CODEBUILD_SRC_DIR/reports/terraform-visual
